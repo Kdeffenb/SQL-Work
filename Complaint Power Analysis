@@ -1,0 +1,212 @@
+with exp_users as (select 
+    variation_key as test_group,
+    RULE_KEY as experiment_name,
+    USER_ID,
+    ORIGINAL_TIMESTAMP as exp_timestamp
+    --, row_number() over(partition by user_id order by timestamp asc) as row_num
+  from 
+      PRD_DATALAKEHOUSE.NG_VIEWS.ARISTOTLE_EXPERIMENT_ACTIVATION_EVENTS
+  where 
+  
+    experiment_id in ('20730010730')
+        and ORIGINAL_TIMESTAMP >= '2021-12-18' --start date
+    and ORIGINAL_TIMESTAMP < '2022-01-18' --end date
+  qualify row_number() over(partition by user_id order by ORIGINAL_TIMESTAMP asc) = 1
+  
+  order by user_id,test_group)--,row_num)
+
+--select * from exp_users
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--Customer Type is classified based on the subscription type associated with their latest order
+--Note:
+-- To classify into annual and monthly..
+--1.) There are few customers with two active subscriptions (ex: customer_id - 1969)
+--2.) there are few visa subscriptions that are not seen in subscription base hence using both visa orders and subscription base table to fetch plan type
+--3.) For those which are present in subscription base the signup intervals are not seen with right lablels (i.e, All Infinite subscritions are not seen with '1 year' signup interval)
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+, latest_order as
+(
+ SELECT
+    o.CUSTOMER_ID as CUSTOMER_ID
+   ,o.id AS ORDER_ID
+   ,o.created_at::DATE AS latest_order_date
+     FROM OG_VIEWS.orders o
+    WHERE --O.created_at::date >= '2021-11-15' and 
+       o.created_at::date < '2022-01-18' -------------------gives the latest order date within the experiment end date
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY CUSTOMER_ID ORDER BY LATEST_order_date desc) = 1  
+  --GROUP BY 1,2
+)
+----------------------------------------------------------------------------------------------------------------------------------------------
+--
+--for customers with non -visa subscription
+--Fetching the subscription id and plan type for a customer based on his latest order (i.e, plan type assosiated with is latest order)
+--using subscription base table
+
+----------------------------------------------------------------------------------------------------------------------------------------------
+
+, customer_type_by_subscription_base as 
+(
+select
+l.customer_id,
+l.latest_order_date,
+l.order_id,
+sb.subscription_id,
+sb.start_date 
+,Case when sb.subscription_id is not null and sb.signup_interval = '1 year' then 'annual' 
+        when sb.subscription_id is not null and sb.signup_interval <> '1 year' then 'monthly'
+        when sb.subscription_id is null then NULL
+        end as  signup_interval
+  ,Case when sb.subscription_id is not null and sb.current_interval = '1 year' then 'annual' 
+        when sb.subscription_id is not null and sb.current_interval <> '1 year' then 'monthly'
+        when sb.subscription_id is null then NULL
+        end as  current_interval
+ from latest_order l 
+  left join  PRD_DATALAKEHOUSE.DATA_SCIENCE.subscription_base as SB 
+  on l.customer_id = sb.customer_id
+  AND  NOT sb.exclude_from_base AND sb.deleted_at IS NULL AND l.latest_order_date BETWEEN sb.start_date AND COALESCE(sb.trial_abandon_time,sb.churn_service_time,sb.churn_payment_time,current_timestamp())
+--WHERE L.CUSTOMER_ID=7 
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY l.customer_id,l.LATEST_order_date ORDER BY start_date desc) = 1 ----removing customers with more than 1 active subscription(taking the latest one)
+)
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- customer_type_considering_visa CTE
+--combining the latest order and subscription details with visa orders table to fetch the details if the customers latest order is assosiated to visa
+-- EXCLUDING details if its a 'Pre-trial' order
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+, customer_type_considering_visa as
+(
+select 
+c.*,
+v.visa_benefit_stage,
+v.VISA_BENEFIT_NAME,
+Case when v.visa_benefit_stage is not null and v.VISA_BENEFIT_NAME = 'Infinite' then 'visa annual' 
+        when v.visa_benefit_stage is not null and v.VISA_BENEFIT_NAME <> 'Infinite' then 'visa monthly' 
+        else NULL end as visa_interval
+  
+ from customer_type_by_subscription_base c
+  LEFT JOIN DATA_SCIENCE.VISA_ORDERS as v
+        ON c.order_id = v.order_id AND v.visa_benefit_stage <> 'Pre-trial'
+)
+
+-----------------------------------------------------------------------------------------------------------
+--first_order CTE
+-- fetching first order details of customer
+------------------------------------------------------------------------------------------------------------
+
+,first_order AS (
+  SELECT
+    customer_id, 
+    MIN(created_at::DATE) AS first_order_date
+    FROM og_views.orders
+    WHERE status = 'delivered'
+    AND delivered_at IS NOT NULL
+    GROUP BY 1),
+  
+-------------------------------------------------------------------------------------------------------------------------------
+-- orders CTE
+
+-- Joining the subscription details with the customers who placed an orders in the given period of time
+-- IS_VISA is true if the latest order was in association with visa
+--CUSTOMER_TYPE - (annual/monthly/visa annual/visa monthly/PPO)
+--first_order_type - new/existing (based on if they existed before experiment started)
+
+-------------------------------------------------------------------------------------------------------------------------------
+orders_query as 
+(SELECT
+   o.CUSTOMER_ID as CUSTOMER_ID
+  , signup_interval 
+  , current_interval
+  , VISA_BENEFIT_NAME
+  , visa_benefit_stage
+  , o.metro_id as metro_id
+  , M.name AS metro_name 
+  , M.region as region
+  , o.created_at
+  , o.created_at::date as order_created_date -- this is important to fix the date
+  ,CASE WHEN O.partner_id IS NOT NULL THEN 'whitelabel'
+      WHEN O.is_external_platform_order THEN 'platform'
+      ELSE 'marketplace' END AS product_line
+  ,fo.first_order_date              
+  ,o.ID AS order_id
+  ,o.actual_subtotal AS gmv
+  ,o.order_lines_count AS basket_size
+  ,o.status,
+  os.retailer,
+  os.rating,
+  os.total_items
+  ,o.source
+  ,IFF(o.delivered_at > DATEADD(hour, 1 ,TS.starts_at), 1, 0) AS late_flag
+  ,IFF(zeroifnull(RO.reschedules)::int > 0, 1, 0)  as rescheduled_flag
+  ,IFF(O.STATUS = 'cancelled', 1, 0) AS cancelled_flag
+  , CASE WHEN fo.first_order_date >= '2021-11-17' -- if customer's first order is created after exp start
+  THEN 'New_Customer'
+  ELSE 'Existing_Customer'
+  END AS first_order_type,
+  CASE WHEN visa_benefit_stage IS NOT NULL THEN TRUE ELSE FALSE END AS IS_VISA,
+  COALESCE (visa_interval,SIGNUP_INTERVAL,'PPO')  AS CUSTOMER_TYPE,
+ CASE 
+    WHEN LOWER(c.username) LIKE '%test%' THEN 'test account'
+        WHEN LOWER(c.username) LIKE '%shipt.com%' THEN 'employee'
+        WHEN d.id IS NOT NULL THEN 'shopper' else 'checking' end as SHOPPER_TEST_EMPLOYEE
+        
+    FROM OG_VIEWS.orders o
+    LEFT JOIN OG_VIEWS.time_slots TS
+      ON O.time_slot_id = TS.id
+    LEFT JOIN
+    (SELECT order_id,count(id) as reschedules
+      FROM og_views.order_reassignments
+      WHERE new_time_slot_id > old_time_slot_id
+     GROUP BY 1
+    )RO ON O.id = RO.order_id
+    INNER JOIN OG_VIEWS.metros AS M ON o.metro_id = M.id
+    left join data_science.orders_type OT on o.id = OT.order_id  
+    left join data_science.order_stats os on o.id = os.order_id
+    LEFT JOIN first_order AS fo ON o.customer_id = fo.customer_id
+    LEFT JOIN customer_type_considering_visa CT on CT.customer_id = o.customer_id
+    LEFT JOIN OG_VIEWS.CUSTOMERS as c
+    ON o.customer_id = c.id
+LEFT JOIN OG_VIEWS.DRIVERS as d
+    ON d.email = c.username
+   
+    WHERE o.created_at::date >= '2021-12-18' -- start date here
+    and o.created_at::date < '2022-01-18' -- end date here
+    and product_line = 'marketplace'
+    and c.deleted_at is null
+    and d.deleted_at is null
+    AND O.STATUS = 'delivered'
+ )
+
+--select * from exp_users e1 left join orders_query oq on e1.user_id = oq.customer_id
+--where customer_type = 'PPO' order by user_id,customer_id;
+, sample_data as (
+    select test_group, e1.user_id as exp_user,
+       oq.customer_id as ppo_user,
+       oq.order_id as ppo_order_id
+    from exp_users e1 
+    left join 
+       (select * from orders_query where customer_type = 'PPO') 
+    oq on e1.user_id = oq.customer_id
+    group by 1,2,3,4
+)
+
+--Used to examine the data in the table in order to aggregate it in the final part of the code.
+---select * from sample_data
+
+/*    select count(distinct exp_user) as total_exp_user,
+count(distinct case when ppo_user is not null then ppo_user end) as ppo_order_user,
+count(distinct case when ppo_user is not null then ppo_order_id end) as ppo_order_count
+from sample_data
+Where test_group = 'variation_1' */
+
+select count(distinct ppo_user) as ppo_user_count,
+sum(ppo_order_count) as ppo_order_count,
+sum(ppo_sq_order_count) as ppo_sq_order_count
+from(select
+    ppo_user, count(distinct ppo_order_id) as ppo_order_count, square(count(distinct ppo_order_id)) as ppo_sq_order_count
+    from sample_data
+    where test_group = 'variation_1'
+    group by 1)
