@@ -1,0 +1,59 @@
+--Need to know how many total connections we have
+--Need to know how many times each connected shopper has delivered to their connected member group by number of deliveries
+--We need to be able to locate orders delivered by preferred shoppers group by customer_id and then group by customer Id which would show the
+--total number of deliveries made by a connected shopper to a customer. We could then take that data and group by that number of delivieres column
+
+--provides customer_id and matched driver_id
+with connections_base as (
+select --*
+     try_cast(pf.shopper_id as integer) as driver_id,
+     try_cast(pf.member_id as integer) as customer_id
+   , d.metro_id, m.name as metro_name
+   ,array_construct(shopper_id::integer, member_id::integer) as combo
+   ,coalesce(member_removed_at, shopper_removed_at) as removed_at
+   ,case when removed_at is not null then 'removed'
+    when (accepted_at is not null and removed_at is null) then 'accepted'
+    when (ignored_at is not null and removed_at is null) then 'ignored'
+    when shopper_notification_sent_at is not null then 'notified'
+   end as current_status
+   ,pf.updated_at   
+   ,shopper_notification_sent_at as notified_at,
+   pf.accepted_at,
+   ignored_at,
+   member_removed_at,
+   shopper_removed_at
+  from ng_views.pairings_favorites pf
+  join og_views.drivers d on try_cast(pf.shopper_id as integer) = d.id  --- driver s table
+  join og_views.customers c on pf.member_id = c.id
+  join og_views.metros m on d.metro_id = m.id
+  --right outer join og_views.orders o on o.customer_id = pf.member_id  
+  where d.deactivated_at is null
+    and current_status = 'accepted'
+    --and o.created_at >= (current_date()-30)
+  --and pf.created_at > '2021-08-17' and pf.created_at < '2021-11-1'
+  ---and pf.driver_id not in ('"or true','or TRUE')
+  -- where customer_id = '4'
+  order by 1,4)
+
+--select * from preferred_data
+
+--number of unique connections formed within X time period (recency)
+select count(distinct(cb.combo)), count(distinct(o.id))
+from connections_base cb
+join og_views.orders o
+    on cb.customer_id = o.customer_id AND cb.driver_id = o.driver_id
+where cb.accepted_at >= (current_date()-90)
+and o.created_at >= (current_date()-90)
+
+--unique connections used in the last X days
+select count(distinct(cb.combo))
+from connections_base cb
+join og_views.orders o
+    on cb.customer_id = o.customer_id AND cb.driver_id = o.driver_id
+where o.created_at >= (current_date()-90)
+and o.created_at >= cb.accepted_at
+
+
+--how many total connections we have
+select count(customer_id)
+from preferred_data
