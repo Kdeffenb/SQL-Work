@@ -1,0 +1,153 @@
+--- Add filter to only include shoppers with orders delivered since 1/1/2022
+
+
+with connections_base as(
+select --*
+     try_cast(pf.shopper_id as integer) as driver_id,
+     try_cast(pf.member_id as integer) as customer_id
+   , d.metro_id, m.name as metro_name
+   ,array_construct(shopper_id::integer, member_id::integer) as combo
+   ,coalesce(member_removed_at, shopper_removed_at) as removed_at
+   ,case when removed_at is not null then 'removed'
+    when (accepted_at is not null and removed_at is null) then 'accepted'
+    when (ignored_at is not null and removed_at is null) then 'ignored'
+    when shopper_notification_sent_at is not null then 'notified'
+   end as current_status
+   ,pf.updated_at   
+   ,shopper_notification_sent_at as notified_at,
+   pf.accepted_at,
+   ignored_at,
+   member_removed_at,
+   shopper_removed_at
+  from ng_views.pairings_favorites pf
+  join og_views.drivers d on try_cast(pf.shopper_id as integer) = d.id  --- driver s table
+  join og_views.customers c on pf.member_id = c.id
+  join og_views.metros m on d.metro_id = m.id
+  where d.deactivated_at is null
+    and current_status = 'accepted'
+    and c.deleted_at is null
+  order by 2,1,4)
+  ---select * from connections_base;
+
+
+,shoppers as (
+select d.id as shopper_id
+    from og_views.drivers d
+    join og_views.orders o
+    on d.id = o.driver_id
+where o.is_external_platform_order = 'false'
+    and o.partner_id is null
+    and d.deactivated_at is null
+    )
+---select * from shoppers
+    
+
+, pmshoppers as (
+select count(distinct(cb.driver_id)) as pmshoppers, count(distinct(s.shopper_id)) as shoppers, pmshoppers/shoppers as percent_preferred
+    from shoppers s
+left join connections_base cb
+    on s.shopper_id = cb.driver_id
+left join og_views.orders o
+    on s.shopper_id = o.driver_id
+---where o.is_external_platform_order = 'false'
+    ---and o.partner_id is null
+    where o.delivered_at >= '1/1/2022'
+    )
+    
+select * from pmshoppers;
+
+
+---Members
+
+with connections_base as (
+select --*
+     try_cast(pf.shopper_id as integer) as driver_id,
+     try_cast(pf.member_id as integer) as customer_id
+   , d.metro_id, m.name as metro_name
+   ,array_construct(shopper_id::integer, member_id::integer) as combo
+   ,coalesce(member_removed_at, shopper_removed_at) as removed_at
+   ,case when removed_at is not null then 'removed'
+    when (accepted_at is not null and removed_at is null) then 'accepted'
+    when (ignored_at is not null and removed_at is null) then 'ignored'
+    when shopper_notification_sent_at is not null then 'notified'
+   end as current_status
+   ,pf.updated_at   
+   ,shopper_notification_sent_at as notified_at,
+   pf.accepted_at,
+   ignored_at,
+   member_removed_at,
+   shopper_removed_at
+  from ng_views.pairings_favorites pf
+  join og_views.drivers d on try_cast(pf.shopper_id as integer) = d.id  --- driver s table
+  join og_views.customers c on pf.member_id = c.id
+  join og_views.metros m on d.metro_id = m.id
+  --right outer join og_views.orders o on o.customer_id = pf.member_id  
+  where d.deactivated_at is null
+    and current_status = 'accepted'
+    --and o.created_at >= (current_date()-30)
+  --and pf.created_at > '2021-08-17' and pf.created_at < '2021-11-1'
+  ---and pf.driver_id not in ('"or true','or TRUE')
+  -- where customer_id = '4'
+  order by 1,4)
+  
+  select * from connections_base
+
+,mcount as(select count(cb.customer_id), o.id, o.created_at
+from connections_base cb
+  join og_views.orders o
+    on cb.customer_id = o.customer_id
+---where o.is_external_platform_order = 'false'
+    ---and o.partner_id is null
+where o.delivered_at >= (current_date()-30) ---'1/1/2022'---
+    and o.is_external_platform_order = 'false'
+    and o.partner_id is null
+  order by 1)
+
+select * from mcount;
+
+
+,members as ( --- all metros
+  SELECT
+  DISTINCT C.id as customer_id, C.metro_id, m.name as metro_name, current_status_class 
+  ,COALESCE(IFF((TRIAL_END >= CURRENT_DATE AND SB.churn_payment_time IS NULL) OR
+      (TRIAL_END >= SB.churn_payment_time), SB.start_date, SB.paying_start_date)
+      ,SB.CREATED_AT)::date as plan_start_date
+  ,CASE
+    WHEN SB.current_interval like '%month%' THEN  'Monthly'
+    WHEN SB.current_interval like '%year%' THEN  'Annual'
+    ELSE SB.current_interval
+  END as plan_type_temp
+  ,CASE
+    WHEN TRIAL_END IS NULL THEN plan_type_temp
+    WHEN TRIAL_END <= CURRENT_DATE AND SB.churn_payment_time IS NULL THEN plan_type_temp
+    WHEN TRIAL_END < SB.churn_payment_time THEN plan_type_temp
+    WHEN TRIAL_END >= CURRENT_DATE AND SB.churn_payment_time IS NULL THEN 'Trial'
+    WHEN TRIAL_END >= SB.churn_payment_time OR plan_type_temp in ('1 day','1 week') THEN 'Trial'
+    ELSE 'Check'
+  END as plan_type
+  FROM OG_VIEWS.customers C
+    INNER JOIN DATA_SCIENCE.subscription_base SB
+      ON C.id = SB.customer_id
+  join og_views.metros m on c.metro_id = m.id
+  WHERE NOT SB.exclude_from_base AND SB.deleted_at IS NULL
+  and customer_id not in (select distinct customer_id from DATA_SCIENCE.VISA_ENROLLMENTS where current_status <> 'pre-trial') --excl. visa program participants
+  and current_status_class = 'current'
+  ---and SB.origination = 'marketplace'
+  qualify row_number() over(partition by customer_id order by paying_start_date desc) = 1  
+)
+
+--question 1 total members with preferred shoppers (raw customer count of all members)
+,ps_members as(
+select count(cb.customer_ID) AS psmember_count, count(distinct(m.customer_id)) as tmember_count, psmember_count/tmember_count AS percentps_member
+from members m
+left join connections_base cb
+    on cb.customer_id = m.customer_id
+join og_views.orders o
+    on m.customer_id = o.customer_id
+---where o.is_external_platform_order = 'false'
+    ---and o.partner_id is null
+where o.delivered_at >= (current_date()-30) ---'1/1/2022'---
+    and o.is_external_platform_order = 'false'
+    and o.partner_id is null
+)
+select * from ps_members;
