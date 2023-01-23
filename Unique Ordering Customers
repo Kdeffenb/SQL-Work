@@ -1,0 +1,201 @@
+with One_Week as
+(select count(distinct o.CUSTOMER_ID) as Customer_ID
+From OG_VIEWS.ORDERS o
+Where o.CREATED_AT::date <= current_date and o.CREATED_AT::date >= (current_date-7))
+ 
+Select * from One_Week;
+
+with Two_Week as
+(select count(distinct o.CUSTOMER_ID) as Customer_ID
+From OG_VIEWS.ORDERS o
+Where o.CREATED_AT::date <= current_date and o.CREATED_AT::date >= (current_date-14))
+ 
+Select * from Two_Week;
+
+
+with Four_Week as
+(select count(distinct o.CUSTOMER_ID) as Customer_ID
+From OG_VIEWS.ORDERS o
+Where o.CREATED_AT::date <= current_date and o.CREATED_AT::date >= (current_date-28))
+ 
+Select * from Four_Week;
+
+with Eight_Week as
+(select count(distinct o.CUSTOMER_ID) as Customer_ID
+From OG_VIEWS.ORDERS o
+Where o.CREATED_AT::date <= current_date and o.CREATED_AT::date >= (current_date-56))
+ 
+Select * from Eight_Week;
+
+with Sixteen_Week as
+(select count(distinct o.CUSTOMER_ID) as Customer_ID
+From OG_VIEWS.ORDERS o
+Where o.CREATED_AT::date <= current_date and o.CREATED_AT::date >= (current_date-112))
+ 
+Select * from Sixteen_Week;
+
+--------------------------------
+
+
+with date_details as (
+  select DAY as d_start,
+  --weekly_dates_start
+  dateadd('day',-7,d_start) as Lastweek_start,
+  dateadd('day',6,Lastweek_start) as Lastweek_end,
+  
+  dateadd('day',-7,Lastweek_start) as second_last_week_start,
+  dateadd('day',6,second_last_week_start) as second_last_week_end,
+  
+  dateadd('day',-7,second_last_week_start) as third_last_week_start,
+  dateadd('day',6,third_last_week_start) as third_last_week_end,
+  
+  dateadd('day',-7,third_last_week_start) as fourth_last_week_start,
+  dateadd('day',6,fourth_last_week_start) as fourth_last_week_end,
+  
+  dateadd('day',-7,fourth_last_week_start) as fifth_last_week_start,
+  dateadd('day',6,fifth_last_week_start) as fifth_last_week_end,
+  
+  dateadd('day',-7,fifth_last_week_start) as sixth_last_week_start,
+  dateadd('day',6,sixth_last_week_start) as sixth_last_week_end,
+  
+  --weekly_dates_end
+  -----------------------------------------------------------------------------------
+  --bi-weekly-dates-start
+  dateadd('day',-14,d_start) as bi_Lastweek_start,
+  dateadd('day',13,bi_Lastweek_start) as bi_Lastweek_end,
+  
+  dateadd('day',-14,bi_Lastweek_start) as bi_second_last_week_start,
+  dateadd('day',13,bi_second_last_week_start) as bi_second_last_week_end,
+  
+  dateadd('day',-14,bi_second_last_week_start) as bi_third_last_week_start,
+  dateadd('day',13,bi_third_last_week_start) as bi_third_last_week_end,
+  
+  dateadd('day',-14,bi_third_last_week_start) as bi_fourth_last_week_start,
+  dateadd('day',13,bi_fourth_last_week_start) as bi_fourth_last_week_end,
+  
+  dateadd('day',-14,bi_fourth_last_week_start) as bi_fifth_last_week_start,
+  dateadd('day',13,bi_fifth_last_week_start) as bi_fifth_last_week_end,
+  
+  dateadd('day',-14,bi_fifth_last_week_start) as bi_sixth_last_week_start,
+  dateadd('day',13,bi_sixth_last_week_start) as bi_sixth_last_week_end,
+  --bi-weekly-end--
+  ------------------------------------------------------------------------------------------
+  --four-weekly-start
+  dateadd('day',-28,d_start) as fo_Lastweek_start,
+  dateadd('day',27,fo_Lastweek_start) as fo_Lastweek_end,
+  
+  dateadd('day',-28,fo_Lastweek_start) as fo_second_last_week_start,
+  dateadd('day',27,fo_second_last_week_start) as fo_second_last_week_end,
+  
+  dateadd('day',-28,fo_second_last_week_start) as fo_third_last_week_start,
+  dateadd('day',27,fo_third_last_week_start) as fo_third_last_week_end,
+  
+  dateadd('day',-28,fo_third_last_week_start) as fo_fourth_last_week_start,
+  dateadd('day',27,fo_fourth_last_week_start) as fo_fourth_last_week_end,
+  
+  dateadd('day',-28,fo_fourth_last_week_start) as fo_fifth_last_week_start,
+  dateadd('day',27,fo_fifth_last_week_start) as fo_fifth_last_week_end,
+  
+  dateadd('day',-28,fo_fifth_last_week_start) as fo_sixth_last_week_start,
+  dateadd('day',27,fo_sixth_last_week_start) as fo_sixth_last_week_end,
+  --four-weekly-end---
+  ----------------------------------------------------------------------------------
+  --eight-weekly-start
+  dateadd('day',-56,d_start) as ei_Lastweek_start,
+  dateadd('day',55,ei_Lastweek_start) as ei_Lastweek_end,
+  
+  dateadd('day',-56,ei_Lastweek_start) as ei_second_last_week_start,
+  dateadd('day',55,ei_second_last_week_start) as ei_second_last_week_end,
+  
+  dateadd('day',-56,ei_second_last_week_start) as ei_third_last_week_start,
+  dateadd('day',55,ei_third_last_week_start) as ei_third_last_week_end,
+  
+  dateadd('day',-56,ei_third_last_week_start) as ei_fourth_last_week_start,
+  dateadd('day',55,ei_fourth_last_week_start) as ei_fourth_last_week_end,
+  
+  dateadd('day',-56,ei_fourth_last_week_start) as ei_fifth_last_week_start,
+  dateadd('day',55,ei_fifth_last_week_start) as ei_fifth_last_week_end,
+  
+  dateadd('day',-56,ei_fifth_last_week_start) as ei_sixth_last_week_start,
+  dateadd('day',55,ei_sixth_last_week_start) as ei_sixth_last_week_end,
+  --eight-weekly-end
+  -------------------------------------------------------------------------------------------
+  --sixteen-weekly-start
+  dateadd('day',-112,d_start) as si_Lastweek_start,
+  dateadd('day',111,si_Lastweek_start) as si_Lastweek_end,
+  
+  dateadd('day',-112,si_Lastweek_start) as si_second_last_week_start,
+  dateadd('day',111,si_second_last_week_start) as si_second_last_week_end,
+  
+  dateadd('day',-112,si_second_last_week_start) as si_third_last_week_start,
+  dateadd('day',111,si_third_last_week_start) as si_third_last_week_end,
+  
+  dateadd('day',-112,si_third_last_week_start) as si_fourth_last_week_start,
+  dateadd('day',111,si_fourth_last_week_start) as si_fourth_last_week_end,
+  
+  dateadd('day',-112,si_fourth_last_week_start) as si_fifth_last_week_start,
+  dateadd('day',111,si_fifth_last_week_start) as si_fifth_last_week_end,
+  
+  dateadd('day',-112,si_fifth_last_week_start) as si_sixth_last_week_start,
+  dateadd('day',111,si_sixth_last_week_start) as si_sixth_last_week_end
+  ---sixteen-weekly-end
+  -----------------------------------------------------------------------------------------------------------------------
+
+
+from PRD_DATALAKEHOUSE.DATA_SCIENCE.DATE_SPINE_DAY 
+where DAY>'2022-01-01' and DAY<=current_date())
+--select * from date_details;
+
+,ordering_cus as (
+  select 
+    c.id as customer_id,
+    c.created_at::date as customer_created_at,
+    o.id as order_id,
+    date_trunc('day',o.created_at)::date as order_created_at
+from OG_VIEWS.ORDERS o
+left join OG_VIEWS.CUSTOMERS c ON o.customer_id = c.id and c.deleted_at is null --removing all the deleted customer's
+where
+    --o.delivered_at >= '2020-01-01'
+    o.status = 'delivered'
+    AND o.delivered_at IS NOT NULL
+    AND NOT o.is_external_platform_order
+    AND o.partner_id IS NULL
+)
+
+, weekly_total_customers as (
+select
+d_start,
+  
+count(distinct case when c.order_created_at = d_start then c.customer_id END) AS Total_customers_per_Day,
+   
+  
+count(distinct case when c.order_created_at between Lastweek_start and Lastweek_end then c.customer_id END) AS Total_customers_lastweek,
+
+------------------------------------------------------------------------------------------------
+  --bi-weekly---
+count(distinct case when c.order_created_at between bi_Lastweek_start and bi_Lastweek_end then c.customer_id END) AS bi_Total_customers_lastweek,
+
+------------------------------------------------------------------------------------------------------------------
+--four-weekly--
+count(distinct case when c.order_created_at between fo_Lastweek_start and fo_Lastweek_end then c.customer_id END) AS fo_Total_customers_lastweek,
+
+-----------------------------------------------------------------------------------------------------------------------------
+--eight-weekly
+  
+count(distinct case when c.order_created_at between ei_Lastweek_start and ei_Lastweek_end then c.customer_id END) AS ei_Total_customers_lastweek,
+
+-------------------------------------------------------------------------------------------------------------------------------
+--sixteen-weekly
+count(distinct case when c.order_created_at between si_Lastweek_start and si_Lastweek_end then c.customer_id END) AS si_Total_customers_lastweek
+
+
+
+
+from date_details d
+cross join ordering_cus c
+  --where datediff('day',CUSTOMER_CREATED_AT,D_START) > 35
+--on d.d_start = o.order_created_at
+--where o.customer_id = 7970271
+group by 1)
+
+select * from weekly_total_customers;
