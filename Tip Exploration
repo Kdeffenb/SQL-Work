@@ -1,0 +1,144 @@
+with android_tip as(select count(at.cart_tip) as android_tip
+from prd_segment_events.android.checkout_process_completed at
+where at.cart_tip > 0
+and at.timestamp >= '2022-1-1')
+
+,ios_tip as (select count(it.cart_tip) as ios_tip
+from prd_segment_events.ios.checkout_process_completed it
+where it.cart_tip > 0
+and it.timestamp >= '2022-1-1')
+
+, web_tip as (select count(pt.cart_tip) as web_tip
+from prd_segment_events.segway_production.checkout_process_completed pt
+where pt.cart_tip > 0
+and pt.timestamp >= '2022-1-1')
+
+, order_total as(select count(o.id)
+from og_views.orders o
+where o.created_at >= '2022-1-1')
+
+select * from order_total
+
+
+with order_stat as (
+      SELECT
+        DISTINCT O.CUSTOMER_ID as CUSTOMER_ID
+        , o.metro_id as metro_id
+        , M.name AS metro_name, M.region as region
+        , o.driver_id, o.created_at 
+        , o.created_at as order_created_date
+        ,CASE WHEN O.partner_id IS NOT NULL THEN 'whitelabel'
+            WHEN O.is_external_platform_order = 'TRUE' THEN 'platform'
+            ELSE 'marketplace' END AS product_line
+        ,o.is_external_platform_order 
+        ,O.ID AS order_id
+        ,iff(r.rating is not null, r.rating, 0) as rating
+        ,O.tip, O.TIP_CAPTURED_AT, o.actual_tip
+        ,O.actual_subtotal AS gmv
+        ,O.order_lines_count AS basket_size
+        ---,IFF(O.STATUS = 'cancelled', 1, 0) AS cancelled_flag
+        FROM OG_VIEWS.orders O
+          INNER JOIN OG_VIEWS.metros AS M ON O.metro_id = M.id
+          left join og_views.ratings r on o.id = r.order_id
+          WHERE O.created_at::date between '2022-02-01' and '2022-06-05'
+          and product_line in ('marketplace')
+          and o.status = 'delivered'
+          --and o.customer_id = '6' and o.driver_id = '9312'
+          group by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16
+)
+
+, checkout_proc_completed as (
+        select user_id, order_id,timestamp,cart_tip,cart_tax,cart_subtotal,cart_total,order_lines_count
+        from prd_segment_events.ios.checkout_process_completed
+        where timestamp >= '2022-02-01'
+  
+        union all 
+  
+         select user_id, order_id,timestamp,cart_tip,cart_tax,cart_subtotal,cart_total,order_lines_count
+        from prd_segment_events.android.checkout_process_completed
+        where timestamp >= '2022-02-01'
+  
+        union all 
+  
+        select user_id, order_id,timestamp,cart_tip,cart_tax,cart_subtotal,cart_total,order_lines_count
+        from prd_segment_events.segway_production.checkout_process_completed
+        where timestamp >= '2022-02-01'
+)
+
+, tip_update as (
+        select user_id, new_tip_value,order_id,shopper_id,existing_tip_value, timestamp
+        from prd_segment_events.ios.tip_updated
+        where timestamp >= '2022-02-01'
+  
+        union all 
+  
+         select user_id, new_tip_value,order_id,shopper_id,existing_tip_value, timestamp
+        from prd_segment_events.android.tip_updated
+        where timestamp >= '2022-02-01'
+  
+        union all 
+  
+        select user_id, new_tip_value,order_id,shopper_id,existing_tip_value, timestamp
+        from prd_segment_events.segway_production.tip_updated
+        where timestamp >= '2022-02-01'
+)
+
+, combine as (
+    select 
+    os.customer_id, os.driver_id, os.created_at, 
+    os.order_id, os.rating, os.gmv, os.basket_size,os.tip, os.actual_tip,os.tip_captured_at,
+    cpc.timestamp as order_timestamp, cpc.cart_tip, cpc.cart_subtotal, cpc.cart_total, cpc.order_lines_count as cart_order_lines,
+    tu.shopper_id, tu.timestamp as tip_update_at, tu.existing_tip_value, tu.new_tip_value 
+    from order_stat os
+    left join checkout_proc_completed cpc on os.order_id = cpc.order_id
+    left join tip_update tu on os.order_id = tu.order_id
+    group by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19
+) 
+
+select customer_id, tip, cart_tip, cart_total
+from combine
+where tip > 50 or cart_tip > 50
+order by tip desc
+
+select * from combine
+
+select count(order_id)
+from combine
+where tip < cart_tip
+and cart_tip > 0 and cart_tip is not null
+1,229,120 > 32,196
+--orders where the tip was updated 1,261,314
+
+--select count(order_id)
+--from combine
+--where cart_tip is null or cart_tip = 0
+--and tip is null or tip = 0
+--orders that had no tip at any time 1,144,724
+
+--select count(order_id)
+--from combine
+--where cart_tip is null or cart_tip = 0
+--and tip is not null and tip > 0
+--orders without tip at checkout but with tip later 1,947,697
+
+--select count(cart_tip) as tips_at_checkout
+--from combine
+--where cart_tip is not null AND cart_tip > 0
+--and cart_tip = tip
+--orders with tip at checkout 1,597,656
+
+--select count(order_id)
+--from combine
+--total orders 5,480,101
+
+select 
+case when cart_tip is null then 'no cart_tip for comparison'
+     when cart_tip > 0 and cart_tip = tip then 'tip_no_change_cnt'
+     when cart_tip > 0 and cart_tip <> tip then 'tip_change_orders'
+     when cart_tip = 0 and tip > 0 then 'no_tip_order_placed_add_tip_after'
+     when cart_tip = 0 and tip = 0 then 'zero_tip_order_cnt'
+else null end as tip_type,
+count(distinct order_id) as order_count,
+avg (tip - cart_tip) as avg_delta
+from combine
+group by 1
