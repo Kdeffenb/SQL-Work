@@ -1,0 +1,132 @@
+--CTR - number of people who click the "unlock benefit" button/number of non-members that see the page
+----need to find out how to identify that page / action. should be a segment event of page viewed and elemet clicked
+----compare page viewed / element clicked
+----for control, i need to find the number of non-members that rate their order 5 stars that become members
+--Conversion - number of people who change to membership / number of people who click the "unlock benefit" button
+----need to find identify who made a change to their membership
+
+---customer level (distinct)
+---order level (non-distinct)
+
+with rating_customers as (
+select
+    os.customer_id,
+    os.order_id,
+    os.rating,
+    os.positive_feedback,
+    sub.plan_type_l2
+from PRD_DATALAKEHOUSE.SEGMENT.ORDER_STATS os
+/*left join PRD_DATALAKEHOUSE.NG_VIEWS.AVIATOR_ORDER_RATING r
+    on os.customer_id = r.customer_id*/
+left join PRD_DATALAKEHOUSE.ENTERPRISE_WAREHOUSE.F_SUBSCRIPTION_DETAIL sub on os.customer_id = sub.customer_id
+where os.local_delivered_at_date BETWEEN '2023-03-01' and '2023-03-31'
+    and os.rating = 5
+    and os.positive_feedback = 1
+    and sub.plan_type_l2 is null
+    --or sub.started_at_utc BETWEEN '2023-03-01' and '2023-03-31'
+)
+
+
+, new_members as (
+select
+    sub.customer_id,
+    os.order_id,
+    os.rating,
+    os.positive_feedback,
+    sub.plan_type_l2
+from PRD_DATALAKEHOUSE.SEGMENT.ORDER_STATS os
+/*left join PRD_DATALAKEHOUSE.NG_VIEWS.AVIATOR_ORDER_RATING r
+    on os.customer_id = r.customer_id*/
+left join PRD_DATALAKEHOUSE.ENTERPRISE_WAREHOUSE.F_SUBSCRIPTION_DETAIL sub on os.customer_id = sub.customer_id
+where os.local_delivered_at_date BETWEEN '2023-03-01' and '2023-03-31'
+    and os.rating = 5
+    and os.positive_feedback = 1
+    and sub.plan_type_l2 like any ('Annual%','Month%')
+    and sub.started_at_paid_utc BETWEEN '2023-03-01' and '2023-03-31' 
+)
+
+select (count(r.customer_id)+count(nm.customer_id)) as rating_customers,
+    count(nm.customer_id) as new_members,
+    new_members/rating_customers as conversion_rate
+from new_members nm
+full outer join rating_customers r
+on r.customer_id = nm.customer_id ;
+
+
+select
+    os.customer_id,
+    os.order_id,
+    os.rating,
+    os.positive_feedback,
+    sub.plan_type_l2
+from PRD_DATALAKEHOUSE.SEGMENT.ORDER_STATS os
+/*left join PRD_DATALAKEHOUSE.NG_VIEWS.AVIATOR_ORDER_RATING r
+    on os.customer_id = r.customer_id*/
+left join PRD_DATALAKEHOUSE.ENTERPRISE_WAREHOUSE.F_SUBSCRIPTION_DETAIL sub on os.customer_id = sub.customer_id
+where os.local_delivered_at_date BETWEEN '2023-03-01' and '2023-03-31'
+    and os.rating = 5
+    and os.positive_feedback = 1
+    and sub.plan_type_l2 like any ('Annual%','Month%')
+    and sub.started_at_utc BETWEEN '2023-03-01' and '2023-03-31'
+
+
+
+
+
+select
+    os.customer_id,
+    os.order_id,
+    os.rating,
+    os.positive_feedback,
+    sub.plan_type_l2
+from PRD_DATALAKEHOUSE.SEGMENT.ORDER_STATS os
+/*left join PRD_DATALAKEHOUSE.NG_VIEWS.AVIATOR_ORDER_RATING r
+    on os.customer_id = r.customer_id*/
+left join PRD_DATALAKEHOUSE.ENTERPRISE_WAREHOUSE.F_SUBSCRIPTION_DETAIL sub on os.customer_id = sub.customer_id
+where os.local_delivered_at_date BETWEEN '2023-03-01' and '2023-03-31'
+    and os.rating = 5
+    and os.positive_feedback = 1
+    and sub.plan_type_l2 is null
+    or sub.started_at_utc BETWEEN '2023-03-01' and '2023-03-31'
+
+
+
+
+
+
+
+
+
+    with rating_customers as (
+select
+    os.customer_id,
+    os.order_id,
+    os.utc_created_at,
+    os.rating,
+    os.positive_feedback,
+    sub.plan_type_l2,
+    sub.started_at_paid_utc,
+    datediff('days', utc_created_at, sub.started_at_paid_utc) as time_to_sub
+from PRD_DATALAKEHOUSE.SEGMENT.ORDER_STATS os
+left join (
+  select customer_id, started_at_paid_utc, plan_type_l2
+  from PRD_DATALAKEHOUSE.ENTERPRISE_WAREHOUSE.F_SUBSCRIPTION_DETAIL
+  qualify row_number() over(partition by customer_id order by started_at_paid_utc desc) = 1) sub on os.customer_id = sub.customer_id
+where os.local_delivered_at_date BETWEEN '2023-03-01' and '2023-03-31'
+    and os.rating = 5
+    and os.positive_feedback = 1
+)
+
+select
+count(customer_id) as total_customers,
+sum(case when time_to_sub > 0 then 1 else 0 end) as conversions
+from rating_customers
+;
+
+
+
+
+select distinct rule_key
+from PRD_DATALAKEHOUSE.NG_VIEWS.ARISTOTLE_EXPERIMENT_ACTIVATION_EVENTS
+where rule_key like '%entry%'
+and original_timestamp BETWEEN '2023-04-12' and '2023-04-25'
