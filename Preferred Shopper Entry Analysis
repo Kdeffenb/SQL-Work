@@ -1,0 +1,64 @@
+With experiment_data as (select distinct(try_to_numeric(user_id)) as customer_id, variation_key, original_timestamp
+from PRD_DATALAKEHOUSE.NG_VIEWS.ARISTOTLE_EXPERIMENT_ACTIVATION_EVENTS
+where experiment_id in (23419971001,23501740753)
+and original_timestamp BETWEEN '2023-04-14' and '2023-05-12'
+and variation_key = 'control' //'variation' //'control'
+group by 1,2,3)
+
+, submit_event as (select user_id, timestamp
+from PRD_SEGMENT_EVENTS.SEGWAY_PRODUCTION.ORDER_RATED
+where tags is not null
+and shopper_rating = 5
+and timestamp BETWEEN '2023-04-14' and '2023-05-12'
+UNION ALL
+select user_id, timestamp
+from PRD_SEGMENT_EVENTS.IOS.ORDER_RATED
+where tags is not null
+and shopper_rating = 5
+and timestamp BETWEEN '2023-04-14' and '2023-05-12'
+UNION ALL
+select user_id, timestamp
+from PRD_SEGMENT_EVENTS.ANDROID.ORDER_RATED
+where tags is not null
+and shopper_rating = 5
+and timestamp BETWEEN '2023-04-14' and '2023-05-12'
+)
+
+, subscription_pre as (select sub.customer_id, sub.started_at_paid_utc, sub.plan_type_l2
+from PRD_DATALAKEHOUSE.ENTERPRISE_WAREHOUSE.F_SUBSCRIPTION_DETAIL sub
+left join PRD_DATALAKEHOUSE.SEGMENT.ORDER_STATS os
+    on os.customer_id = sub.customer_id
+where os.utc_delivered_at < sub.started_at_paid_utc or sub.started_at_paid_utc is null
+and os.utc_delivered_at BETWEEN '2023-04-14' and '2023-05-12'
+qualify row_number() over(partition by sub.customer_id order by sub.started_at_paid_utc desc) = 1
+  )
+
+, order_placed as (select customer_id, utc_delivered_at
+from PRD_DATALAKEHOUSE.SEGMENT.ORDER_STATS
+where utc_delivered_at BETWEEN '2023-04-14' and '2023-05-12')
+
+, subscription_post as (select customer_id, started_at_paid_utc, plan_type_l2
+from PRD_DATALAKEHOUSE.ENTERPRISE_WAREHOUSE.F_SUBSCRIPTION_DETAIL sub
+left join submit_event se
+    on se.user_id = sub.customer_id
+where sub.started_at_paid_utc BETWEEN '2023-04-14' and '2023-05-12'
+and sub.started_at_paid_utc >= se.timestamp
+qualify row_number() over(partition by sub.customer_id order by sub.started_at_paid_utc desc) = 1
+)
+
+select
+count(distinct(ed.customer_id)) as experiment_segment,
+count(distinct(subp.customer_id)) as non_members,
+count(distinct(op.customer_id)) as order_placed,
+count(distinct(se.user_id)) as rating_submitted,
+count(distinct(sub.customer_id)) as subscribed_customers,
+subscribed_customers/non_members as conversion_rate
+from experiment_data ed
+left join subscription_pre subp
+    on subp.customer_id = ed.customer_id
+left join order_placed op
+    on op.customer_id = subp.customer_id
+left join submit_event se
+    on se.user_id = op.customer_id
+left join subscription_post sub
+    on sub.customer_id = se.user_id;
