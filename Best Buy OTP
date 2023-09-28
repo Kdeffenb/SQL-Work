@@ -1,0 +1,13 @@
+select
+--date_trunc('week',local_delivered_at_date),
+count(case when on_time = 'TRUE' then order_id end) as on_time_orders,
+count(distinct order_id) as total_orders,
+on_time_orders/total_orders as on_time_percent
+from prd_datalakehouse.enterprise_warehouse.order_stats
+where UTC_DELIVERED_AT BETWEEN '2023-01-29' and '2023-09-03'
+and retailer_id = 149
+--and region = 'Northeast'
+--and store_location_number = 'BBY_1058'
+--and time_agnostic_order_type = 'Next Day Delivery'
+and order_status = 'delivered'
+--group by 1
