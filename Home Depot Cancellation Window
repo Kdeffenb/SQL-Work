@@ -1,0 +1,17 @@
+--How many cancellations occur 61 minutes or more before the delivery window start
+select count(order_id)
+from prd_datalakehouse.enterprise_warehouse.order_stats
+where (timestampdiff(minute,local_cancelled_at,local_delivery_window) > 61)
+and retailer_id = 203
+and order_status = 'canceled'
+
+--the window time is subtracted from the cancelled time which would give us the difference of 
+
+select count(order_id)
+from prd_datalakehouse.enterprise_warehouse.order_stats
+where retailer_id = 203
+and order_status = 'canceled'
+
+
+1 - local_cancelled_at - 12:30
+2 - local_delivery_window - 13:00
