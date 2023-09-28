@@ -1,0 +1,33 @@
+select distinct
+    --order data
+    o.order_id --total
+    ,o.local_delivered_at
+    ,case when o.alcohol_certification_required = 't' then o.order_id else null end as alcohol_order
+    ,case when o.alcohol_certification_required = 'f' then o.order_id else null end as non_alcohol_order
+    ,o.order_type
+    
+    --location data
+    ,o.region
+    ,o.metro_state as state
+    ,o.metro
+    ,sl.store_number
+    ,o.retailer
+    ,case when s.allows_envoy_alcohol or s.allows_marketplace_alcohol or s.allows_pickup_alcohol or s.allows_platform_alcohol then s.name else null end as alcohol_retailer
+    ,case when s.allows_envoy_alcohol = 'f' and s.allows_marketplace_alcohol = 'f' and s.allows_pickup_alcohol = 'f' and s.allows_platform_alcohol = 'f' then s.name else null end as non_alcohol_retailer
+    
+    --financial data
+    ,o.gmv --total
+    ,case when o.alcohol_certification_required = 't' then o.gmv else null end as alcohol_gmv
+    ,case when o.alcohol_certification_required = 'f' then o.gmv else null end as non_alcohol_gmv
+    ,o.in_store_cost --total
+    ,case when o.alcohol_certification_required = 't' then o.in_store_cost else null end as alcohol_iss
+    ,case when o.alcohol_certification_required = 'f' then o.in_store_cost else null end as non_alcohol_iss
+
+from data_science.order_stats o
+    left join ng_views.metropolis_metro m on m.metro_id = o.metro_id
+    left join ng_views.metropolis_store s on s.store_id = o.retailer_id
+    left join ng_views.metropolis_store_location sl on sl.store_location_id = o.store_location_id
+where 1=1
+    and o.order_status = 'delivered'
+    and o.local_delivered_at::date >= '2023-01-01'
+;
