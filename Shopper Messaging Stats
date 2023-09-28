@@ -1,0 +1,36 @@
+---Look for TLMD drivers messaging between 10pm and 7am
+with driven_sessions as (select distinct shopper_id
+from ng_views.in_app_chat_order_sessions cs
+where order_ingest_type = 'driven')
+
+, in_app_messages as (select distinct m.id, m.shopper_id, m.updated_at, rs.store_location_id
+from ng_views.in_app_chat_messages m
+left join data_science.tlmd_route_stats rs on m.shopper_id = rs.driver_id
+where from_user = 'Driver'
+    and m.updated_at::date >= (current_date - 30)
+)
+
+, driver_data as (select distinct driver_name, driver_id, driver_email
+from data_science.tlmd_drivers)
+
+select distinct
+dd.driver_name,
+dd.driver_id,
+dd.driver_email,
+m.updated_at::date as updated_date,
+mm.region,
+mm.state,
+mm.name as metro,
+count(distinct m.id) as message_count
+from driven_sessions ds
+left join in_app_messages m on ds.shopper_id = m.shopper_id
+left join driver_data dd on m.shopper_id = dd.driver_id
+left join ng_views.metropolis_store_location sl on sl.store_location_id = m.store_location_id
+left join ng_views.metropolis_store s on s.store_id = sl.store_id
+left join ng_views.metropolis_metro mm on mm.metro_id = sl.metro_id
+where driver_id is not null
+and date_part('hour',m.updated_at) >= 22 or date_part('hour',m.updated_at) <= 07
+and updated_date <= (current_date - 1)
+and updated_date >= (current_date - 31)
+group by 1,2,3,4,5,6,7
+;
